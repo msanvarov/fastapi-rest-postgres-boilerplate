@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Any, Final, cast
+from typing import Any, Final
 
 import jwt
 from argon2 import PasswordHasher as Argon2Hasher
@@ -103,16 +103,10 @@ def create_token(
     }
     if extra_claims:
         payload.update(extra_claims)
-    # PyJWT >=2 returns str at runtime, but stub versions disagree on the
-    # declared return type. Cast is the only form that satisfies mypy across
-    # both shapes — see jpadilla/pyjwt#834.
-    return cast(
-        "str",
-        jwt.encode(
-            payload,
-            settings.secret_key.get_secret_value(),
-            algorithm=settings.jwt_algorithm,
-        ),
+    return jwt.encode(
+        payload,
+        settings.secret_key.get_secret_value(),
+        algorithm=settings.jwt_algorithm,
     )
 
 
