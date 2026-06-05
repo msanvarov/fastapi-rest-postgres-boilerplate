@@ -1,0 +1,206 @@
+name: cd
+
+# CD fires on:
+#   * push to main           → build + push :main + :sha tags, smoke-test
+#   * tag v*.*.*             → build + push :semver + :latest tags, smoke-test
+#   * manual workflow_dispatch
+#
+# We do NOT re-run lint/test here — those are CI's job, and CD only runs
+# after CI is green on main. This keeps deploys fast and the contract clear.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy"
+        required: true
+        default: "main"
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false   # never cancel a deploy mid-flight
+
+permissions:
+  contents: read
+  packages: write              # push to GitHub Container Registry
+  id-token: write              # OIDC for future cloud deploys
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1) Wait for CI green on this ref.
+  # ---------------------------------------------------------------------------
+  await-ci:
+    name: await CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait for ci workflow
+        if: github.event_name == 'push'
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: "ci summary"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 15
+          allowed-conclusions: success
+
+  # ---------------------------------------------------------------------------
+  # 2) Build + push the container image to GHCR.
+  # ---------------------------------------------------------------------------
+  build-and-push:
+    name: build + push image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: await-ci
+    outputs:
+      image: ${{ steps.meta.outputs.tags }}
+      digest: ${{ steps.push.outputs.digest }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=${{ github.event.repository.name }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+  # ---------------------------------------------------------------------------
+  # 3) Smoke-test the *pulled* image — proves what we just pushed actually runs.
+  # ---------------------------------------------------------------------------
+  smoke:
+    name: smoke published image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build-and-push
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stand up stack against published :sha tag
+        env:
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          SECRET_KEY: smoke-secret-must-be-at-least-32-characters-long-ok
+        run: |
+          cat > docker-compose.smoke.yml <<EOF
+          services:
+            api:
+              image: ${IMAGE_REF}
+              build: !reset null
+              environment:
+                SECRET_KEY: ${SECRET_KEY}
+                POSTGRES_HOST: postgres
+                REDIS_URL: redis://redis:6379/0
+                APP_ENV: production
+                APP_LOG_JSON: "true"
+          EOF
+          docker compose -f docker-compose.yml -f docker-compose.smoke.yml up -d
+
+      - name: Smoke test
+        env:
+          SMOKE_TIMEOUT: "120"
+        run: ./scripts/smoke.sh http://localhost:8000
+
+      - name: Dump api logs on failure
+        if: failure()
+        run: docker compose logs api
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  # ---------------------------------------------------------------------------
+  # 4) Deploy — placeholder for whatever target you run on.
+  #    Swap the body for `kubectl set image`, `flyctl deploy`, `aws ecs ...`, etc.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: smoke
+    environment:
+      name: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging' }}
+    steps:
+      - name: Plan
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "Deploying ${GITHUB_REF#refs/tags/} to production"
+          else
+            echo "Deploying main@${GITHUB_SHA::7} to staging"
+          fi
+
+      - name: Deploy (placeholder)
+        run: |
+          echo "::notice::Wire your deployment command here."
+          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}"
+          echo "Digest: ${{ needs.build-and-push.outputs.digest }}"
+
+  # ---------------------------------------------------------------------------
+  # 5) Post-deploy smoke — runs against the real environment once we know how
+  #    to reach it. Keep it cheap: just /ping + /health/live.
+  # ---------------------------------------------------------------------------
+  post-deploy-smoke:
+    name: post-deploy smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: deploy
+    if: vars.SMOKE_BASE_URL != ''
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Smoke remote
+        env:
+          SMOKE_TIMEOUT: "60"
+        run: ./scripts/smoke.sh "${{ vars.SMOKE_BASE_URL }}"
