@@ -1,16 +1,26 @@
 name: cd
 
-# CD fires on:
-#   * push to main           → build + push :main + :sha tags, smoke-test
-#   * tag v*.*.*             → build + push :semver + :latest tags, smoke-test
-#   * manual workflow_dispatch
+# CD chains off CI completion instead of triggering on the same push. This
+# eliminates the race that the previous `wait-on-check-action` polling had:
+# there's no window where CD could start before CI has registered its checks.
 #
-# We do NOT re-run lint/test here — those are CI's job, and CD only runs
-# after CI is green on main. This keeps deploys fast and the contract clear.
+# Triggers:
+#   * CI workflow run succeeds on main → build, push :main + :sha, smoke,
+#     deploy to staging
+#   * Tag push v*.*.*               → build, push :semver + :latest, smoke,
+#                                      deploy to production
+#   * workflow_dispatch             → manual deploy with explicit ref
+#
+# Note: workflow_run always runs the workflow file from the *default branch*.
+# That's what we want — we don't want a malicious PR to be able to redefine
+# the deploy logic before its own CI run completes.
 
 on:
-  push:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
     branches: [main]
+  push:
     tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
@@ -20,7 +30,7 @@ on:
         default: "main"
 
 concurrency:
-  group: cd-${{ github.ref }}
+  group: cd-${{ github.event.workflow_run.head_sha || github.ref }}
   cancel-in-progress: false   # never cancel a deploy mid-flight
 
 permissions:
@@ -34,23 +44,39 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 1) Wait for CI green on this ref.
+  # 1) Gate — for workflow_run, only proceed if CI actually succeeded.
+  #    GitHub fires the workflow_run trigger for any conclusion (success,
+  #    failure, cancelled), so we filter explicitly.
   # ---------------------------------------------------------------------------
-  await-ci:
-    name: await CI
+  gate:
+    name: gate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 1
+    if: >-
+      github.event_name != 'workflow_run'
+      || github.event.workflow_run.conclusion == 'success'
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      ref: ${{ steps.resolve.outputs.ref }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Wait for ci workflow
-        if: github.event_name == 'push'
-        uses: lewagon/wait-on-check-action@v1.3.4
-        with:
-          ref: ${{ github.sha }}
-          check-name: "ci summary"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 15
-          allowed-conclusions: success
+      - id: resolve
+        run: |
+          # workflow_run fires from default branch; we need the SHA *from CI*,
+          # not the current default-branch HEAD. For tag/manual, fall through.
+          case "${{ github.event_name }}" in
+            workflow_run)
+              echo "sha=${{ github.event.workflow_run.head_sha }}"  >> "$GITHUB_OUTPUT"
+              echo "ref=${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_OUTPUT"
+              ;;
+            workflow_dispatch)
+              echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+              echo "ref=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+              echo "ref=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
 
   # ---------------------------------------------------------------------------
   # 2) Build + push the container image to GHCR.
@@ -59,13 +85,15 @@ jobs:
     name: build + push image
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: await-ci
+    needs: gate
     outputs:
-      image: ${{ steps.meta.outputs.tags }}
+      sha-tag: sha-${{ needs.gate.outputs.sha }}
       digest: ${{ steps.push.outputs.digest }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -79,16 +107,18 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # Don't let metadata-action pull tags from the current event ref —
+          # it can mis-attribute tags when fired via workflow_run.
           tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=long
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=main,enable=${{ needs.gate.outputs.ref == 'main' }}
+            type=raw,value=latest,enable=${{ needs.gate.outputs.ref == 'main' }}
+            type=sha,format=long,prefix=sha-,enable=true
+            type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
           labels: |
             org.opencontainers.image.title=${{ github.event.repository.name }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.gate.outputs.sha }}
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -113,10 +143,12 @@ jobs:
     name: smoke published image
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: build-and-push
+    needs: [gate, build-and-push]
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
@@ -128,9 +160,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Stand up stack against published :sha tag
+      - name: Stand up stack against the published :sha tag
         env:
-          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.sha-tag }}
           SECRET_KEY: smoke-secret-must-be-at-least-32-characters-long-ok
         run: |
           cat > docker-compose.smoke.yml <<EOF
@@ -162,13 +194,12 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # 4) Deploy — placeholder for whatever target you run on.
-  #    Swap the body for `kubectl set image`, `flyctl deploy`, `aws ecs ...`, etc.
   # ---------------------------------------------------------------------------
   deploy:
     name: deploy
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: smoke
+    needs: [gate, build-and-push, smoke]
     environment:
       name: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging' }}
     steps:
@@ -177,27 +208,28 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             echo "Deploying ${GITHUB_REF#refs/tags/} to production"
           else
-            echo "Deploying main@${GITHUB_SHA::7} to staging"
+            echo "Deploying ${{ needs.gate.outputs.ref }}@${{ needs.gate.outputs.sha }} to staging"
           fi
 
       - name: Deploy (placeholder)
         run: |
           echo "::notice::Wire your deployment command here."
-          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}"
+          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.sha-tag }}"
           echo "Digest: ${{ needs.build-and-push.outputs.digest }}"
 
   # ---------------------------------------------------------------------------
-  # 5) Post-deploy smoke — runs against the real environment once we know how
-  #    to reach it. Keep it cheap: just /ping + /health/live.
+  # 5) Post-deploy smoke against the real environment.
   # ---------------------------------------------------------------------------
   post-deploy-smoke:
     name: post-deploy smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: deploy
+    needs: [gate, deploy]
     if: vars.SMOKE_BASE_URL != ''
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
       - name: Smoke remote
