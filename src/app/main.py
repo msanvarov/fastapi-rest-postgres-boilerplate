@@ -12,8 +12,10 @@ inside-out:
 
 …the request lifecycle runs in between, then everything reverses on shutdown.
 
-We use ``orjson`` for response serialisation — drop-in, but a few times
-faster than the stdlib encoder on dict-heavy payloads.
+Response serialisation: FastAPI 0.111+ encodes Pydantic models directly to
+JSON bytes via Pydantic's Rust core, which is faster than ORJSONResponse —
+we don't set a custom default_response_class because doing so now emits a
+deprecation warning.
 """
 
 from __future__ import annotations
@@ -26,7 +28,6 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import ORJSONResponse
 from starlette.middleware.base import RequestResponseEndpoint
 
 from app import __version__
@@ -93,7 +94,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title=settings.app_name,
         version=__version__,
         debug=settings.app_debug,
-        default_response_class=ORJSONResponse,
         docs_url="/docs" if not settings.is_production else None,
         redoc_url="/redoc" if not settings.is_production else None,
         openapi_url="/openapi.json" if not settings.is_production else None,

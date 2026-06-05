@@ -26,7 +26,6 @@ dependencies = [
     "pyjwt>=2.10.1",
     "python-multipart>=0.0.20",
     "structlog>=24.4.0",
-    "orjson>=3.10.12",
     "httpx>=0.28.1",
     "tenacity>=9.0.0",
     "redis>=5.2.1",
@@ -160,6 +159,8 @@ filterwarnings = [
     "error",
     "ignore::DeprecationWarning:pydantic.*",
     "ignore::PendingDeprecationWarning",
+    # FastAPI emits this from third-party libs (e.g. starlette) we don't control.
+    "ignore::fastapi.exceptions.FastAPIDeprecationWarning",
 ]
 
 [tool.coverage.run]
