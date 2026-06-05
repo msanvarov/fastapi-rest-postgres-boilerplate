@@ -26,17 +26,12 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Itera
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
-from typing import Any, ParamSpec, TypeVar
+from typing import Any
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
 
 _logger = get_logger(__name__)
-
-# PEP 695 generics are used on the public helpers below; these legacy aliases
-# stay for the decorator (which needs ParamSpec, not available in PEP 695 yet).
-P = ParamSpec("P")
-R = TypeVar("R")
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +180,7 @@ class BackgroundTaskSupervisor:
 # ---------------------------------------------------------------------------
 # CPU-bound offload
 # ---------------------------------------------------------------------------
-async def run_cpu_bound(  # noqa: UP047 — PEP 695 doesn't support ParamSpec yet
+async def run_cpu_bound[**P, R](
     limits: ConcurrencyLimits,
     func: Callable[P, R],
     /,
@@ -206,7 +201,7 @@ async def run_cpu_bound(  # noqa: UP047 — PEP 695 doesn't support ParamSpec ye
 # ---------------------------------------------------------------------------
 # Decorators / helpers
 # ---------------------------------------------------------------------------
-def with_semaphore(
+def with_semaphore[**P, R](
     semaphore_attr: str,
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Decorator: wrap a coroutine so it acquires a named limiter from app state.

@@ -25,12 +25,25 @@ repos:
       - id: debug-statements
       - id: check-ast
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.4
+  # Run ruff through uv so the version is *always* what uv.lock pins. The
+  # alternative — pinning a separate version under ruff-pre-commit — drifts
+  # against the project venv and we've already burnt one CI cycle on that.
+  - repo: local
     hooks:
-      - id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix --exit-non-zero-on-fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+        pass_filenames: true
       - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+        pass_filenames: true
 
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.5.11
@@ -39,18 +52,11 @@ repos:
       - id: uv-export
         args: ["--frozen", "--output-file=requirements.txt", "--no-dev"]
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.13.0
-    hooks:
-      - id: mypy
-        additional_dependencies:
-          - pydantic>=2.10.4
-          - pydantic-settings>=2.7.0
-          - sqlalchemy>=2.0.36
-          - pyjwt>=2.10.1
-        args: [--config-file=pyproject.toml]
-        files: ^src/
-        exclude: ^alembic/
+  # Note on mypy: we deliberately don't run mypy via pre-commit because the
+  # isolated env can't see our actual runtime deps (fastapi, argon2, etc.)
+  # without us maintaining a duplicate dep list. CI's `lint` job runs
+  # `uv run mypy src` against the full venv, and `make check` does the same
+  # locally — those are the canonical sources of truth.
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2
