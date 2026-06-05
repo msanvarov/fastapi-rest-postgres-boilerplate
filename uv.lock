@@ -496,7 +496,6 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-mock" },
     { name = "ruff" },
-    { name = "types-pyjwt" },
 ]
 
 [package.metadata]
@@ -526,7 +525,6 @@ requires-dist = [
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.36" },
     { name = "structlog", specifier = ">=24.4.0" },
     { name = "tenacity", specifier = ">=9.0.0" },
-    { name = "types-pyjwt", marker = "extra == 'dev'", specifier = ">=1.7.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]
 provides-extras = ["dev"]
@@ -1697,27 +1695,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/5e/ed/ef06584ccdd5c410df0837951ecd7e15d9a6144ea1bd4c73cecab1a89891/typer-0.26.7.tar.gz", hash = "sha256:e314a34c617e419c091b2830dda3ea1f257134ff593061a8f5b9717ab8dddb3a", size = 201709, upload-time = "2026-06-03T07:18:06.843Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/24/25/2201973529af2c954de0bb725323c3aaed6d7f0ceee8f550dec9185df013/typer-0.26.7-py3-none-any.whl", hash = "sha256:5c87cfbc5d34491c5346ebf49c23e18d56ccb863268d3a8d592b26087c2f5e58", size = 122456, upload-time = "2026-06-03T07:18:05.732Z" },
-]
-
-[[package]]
-name = "types-cryptography"
-version = "3.3.23.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/18/05/a57fe8bbed10fe4b739fac6e16c4e80c5199ce2f74ae67fa7d7f6e3750da/types-cryptography-3.3.23.2.tar.gz", hash = "sha256:09cc53f273dd4d8c29fa7ad11fefd9b734126d467960162397bc5e3e604dea75", size = 15461, upload-time = "2022-11-08T18:29:28.012Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b6/36/92dfe7e5056694e78caefd05b383140c74c7fcbfc63d26ee514c77f2d8a2/types_cryptography-3.3.23.2-py3-none-any.whl", hash = "sha256:b965d548f148f8e87f353ccf2b7bd92719fdf6c845ff7cedf2abb393a0643e4f", size = 30223, upload-time = "2022-11-08T18:29:26.848Z" },
-]
-
-[[package]]
-name = "types-pyjwt"
-version = "1.7.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "types-cryptography" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/45/92/f2b9e0a047aa22daf364556a61904e98fd164c07524b18487d4bf01bd858/types-PyJWT-1.7.1.tar.gz", hash = "sha256:99c1a0d94d370951f9c6e57b1c369be280b2cbfab72c0f9c0998707490f015c9", size = 3452, upload-time = "2021-06-17T15:00:54.496Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/5a/65/41dc35b71cbd44dbc40583ab1d7b919e7b5c269ec36b9cee8e26c5d665a0/types_PyJWT-1.7.1-py2.py3-none-any.whl", hash = "sha256:810112a84b6c060bb5bc1959a1d229830465eccffa91d8a68eeaac28fb7713ac", size = 4694, upload-time = "2021-06-17T15:00:53.476Z" },
 ]
 
 [[package]]

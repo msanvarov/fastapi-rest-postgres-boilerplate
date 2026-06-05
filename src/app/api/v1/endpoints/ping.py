@@ -31,7 +31,7 @@ class PingResponse(BaseModel):
     "/ping",
     response_model=PingResponse,
     summary="Smoke-test ping",
-    description="Returns `{\"ping\": \"pong\"}`. Zero dependencies.",
+    description='Returns `{"ping": "pong"}`. Zero dependencies.',
 )
 async def ping() -> PingResponse:
     return PingResponse()

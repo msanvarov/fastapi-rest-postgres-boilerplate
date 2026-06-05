@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -21,8 +23,6 @@ async def test_ping_has_request_id_header(client):
 
 async def test_ping_is_fast(client):
     """Sanity check: cold endpoint stays well under our request-timeout budget."""
-    import time
-
     start = time.perf_counter()
     response = await client.get("/ping")
     elapsed = time.perf_counter() - start

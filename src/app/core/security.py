@@ -37,7 +37,7 @@ class TokenType(StrEnum):
     """Discriminator for access vs refresh tokens — embedded in the JWT ``typ`` claim."""
 
     ACCESS = "access"
-    REFRESH = "refresh"  # noqa: S105 — not a secret
+    REFRESH = "refresh"
 
 
 class TokenPayload(BaseModel):
@@ -103,11 +103,14 @@ def create_token(
     }
     if extra_claims:
         payload.update(extra_claims)
-    return jwt.encode(
+    # PyJWT >=2 returns str, but the bundled stubs still type the return as
+    # bytes for backwards compatibility — see jpadilla/pyjwt#834.
+    encoded: str = jwt.encode(  # type: ignore[assignment]
         payload,
         settings.secret_key.get_secret_value(),
         algorithm=settings.jwt_algorithm,
     )
+    return encoded
 
 
 def decode_token(

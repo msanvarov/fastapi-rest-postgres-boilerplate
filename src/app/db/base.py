@@ -11,13 +11,16 @@ All timestamps are timezone-aware UTC. The DB column defaults use
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime
-from typing import Annotated
 
 from sqlalchemy import DateTime, MetaData, func
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, MappedAsDataclass, mapped_column
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    MappedAsDataclass,
+    declarative_mixin,
+    mapped_column,
+)
 
 # Consistent constraint naming → cleaner Alembic diffs, fewer migration foot-guns.
 _NAMING_CONVENTION = {
@@ -35,43 +38,28 @@ class Base(MappedAsDataclass, DeclarativeBase):
     metadata = MetaData(naming_convention=_NAMING_CONVENTION)
 
 
-# Reusable column types ------------------------------------------------------
-uuid_pk = Annotated[
-    uuid.UUID,
-    mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default_factory=uuid.uuid4,
-        sort_order=-100,
-    ),
-]
+@declarative_mixin
+class TimestampMixin(MappedAsDataclass):
+    """Adds ``created_at`` / ``updated_at`` columns.
 
-created_at = Annotated[
-    datetime,
-    mapped_column(
+    Inherits from :class:`MappedAsDataclass` so SA 2.1+ correctly folds the
+    inherited columns into the dataclass transform on the child. Both columns
+    are ``init=False`` — they're populated by the server and never passed at
+    construction time.
+    """
+
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
         sort_order=100,
         init=False,
-    ),
-]
-
-updated_at = Annotated[
-    datetime,
-    mapped_column(
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
         sort_order=101,
         init=False,
-    ),
-]
-
-
-class TimestampMixin:
-    """Adds ``created_at`` / ``updated_at`` columns."""
-
-    created_at: Mapped[created_at]
-    updated_at: Mapped[updated_at]
+    )

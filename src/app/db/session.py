@@ -14,10 +14,12 @@ Two layers:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Self
 
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -100,8 +102,6 @@ class Database:
 
     async def healthcheck(self) -> bool:
         """Lightweight ``SELECT 1`` — used by ``/health/ready``."""
-        from sqlalchemy import text  # local to avoid import at module load
-
         try:
             async with self.engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
@@ -139,7 +139,7 @@ class UnitOfWork:
     def __init__(self, db: Database) -> None:
         self._db = db
         self._session: AsyncSession | None = None
-        self._sem_ctx = None
+        self._sem_ctx: asyncio.Semaphore | None = None
 
     @property
     def session(self) -> AsyncSession:
@@ -149,7 +149,8 @@ class UnitOfWork:
         return self._session
 
     async def __aenter__(self) -> Self:
-        self._sem_ctx = self._db._limits.db  # noqa: SLF001 — intentional close-coupling
+        # Intentional close-coupling — UoW owns the DB semaphore lifecycle.
+        self._sem_ctx = self._db._limits.db
         await self._sem_ctx.acquire()
         self._session = self._db.sessionmaker()
         await self._session.begin()

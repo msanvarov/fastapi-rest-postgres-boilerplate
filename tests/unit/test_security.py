@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-import time
+import uuid
+from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
 
+from app.core.config import get_settings
 from app.core.security import (
     InvalidTokenError,
     TokenType,
@@ -49,13 +52,22 @@ def test_tampered_token_rejected():
         decode_token(tampered)
 
 
-def test_expired_token_rejected(monkeypatch):
-    from app.core import security
-
-    token = create_token(subject="u", token_type=TokenType.ACCESS)
-    # Fast-forward jwt's notion of "now" by patching time.
-    real_time = time.time
-    monkeypatch.setattr(security.jwt.api_jwt, "datetime", security.datetime)
-    monkeypatch.setattr("time.time", lambda: real_time() + 10**7)
+def test_expired_token_rejected():
+    """Hand-mint a token with an exp in the past — no monkey-patching needed."""
+    settings = get_settings()
+    now = datetime.now(UTC)
+    payload = {
+        "sub": "u",
+        "typ": TokenType.ACCESS.value,
+        "iat": now - timedelta(hours=2),
+        "exp": now - timedelta(hours=1),
+        "jti": str(uuid.uuid4()),
+        "scopes": [],
+    }
+    expired = jwt.encode(
+        payload,
+        settings.secret_key.get_secret_value(),
+        algorithm=settings.jwt_algorithm,
+    )
     with pytest.raises(InvalidTokenError):
-        decode_token(token)
+        decode_token(expired)

@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Generic, TypeVar
-
 from pydantic import BaseModel, Field, NonNegativeInt, PositiveInt
-
-T = TypeVar("T")
 
 
 class ORMModel(BaseModel):
@@ -22,7 +18,7 @@ class PaginationParams(BaseModel):
     offset: NonNegativeInt = 0
 
 
-class Page(BaseModel, Generic[T]):
+class Page[T](BaseModel):
     """Generic paginated envelope."""
 
     items: list[T]

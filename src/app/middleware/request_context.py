@@ -67,7 +67,10 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
         except AppError as exc:
             response = _render_app_error(exc, request_id)
-        except Exception:  # noqa: BLE001 — final safety net
+        except Exception:
+            # Final safety net — anything that escaped the route handlers and
+            # FastAPI's own exception handlers lands here. Logged, then masked
+            # behind a generic 500 so we never leak tracebacks to clients.
             _logger.exception("unhandled_exception")
             response = JSONResponse(
                 ErrorResponse(

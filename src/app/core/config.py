@@ -159,7 +159,7 @@ def get_settings() -> Settings:
     Cached so we read env exactly once. Tests should call
     ``get_settings.cache_clear()`` after mutating the environment.
     """
-    return Settings()  # type: ignore[call-arg]
+    return Settings()
 
 
 SettingsDep = Annotated[Settings, "Settings"]

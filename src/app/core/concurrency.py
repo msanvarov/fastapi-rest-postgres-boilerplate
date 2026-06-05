@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import time
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -33,7 +33,8 @@ from app.core.logging import get_logger
 
 _logger = get_logger(__name__)
 
-T = TypeVar("T")
+# PEP 695 generics are used on the public helpers below; these legacy aliases
+# stay for the decorator (which needs ParamSpec, not available in PEP 695 yet).
 P = ParamSpec("P")
 R = TypeVar("R")
 
@@ -75,7 +76,7 @@ class ConcurrencyLimits:
 # ---------------------------------------------------------------------------
 # Bounded gather / map
 # ---------------------------------------------------------------------------
-async def gather_with_concurrency(
+async def gather_with_concurrency[T](
     limit: int,
     *coros: Awaitable[T],
     return_exceptions: bool = False,
@@ -96,19 +97,22 @@ async def gather_with_concurrency(
         async with sem:
             return await coro
 
-    return await asyncio.gather(
+    # When ``return_exceptions=True`` the runtime list also contains
+    # ``BaseException`` instances. Callers that pass the flag must handle
+    # that themselves; the cast keeps the public signature ergonomic.
+    return await asyncio.gather(  # type: ignore[return-value]
         *(_guarded(c) for c in coros),
         return_exceptions=return_exceptions,
     )
 
 
-async def bounded_map(
-    func: Callable[[T], Awaitable[R]],
+async def bounded_map[T, U](
+    func: Callable[[T], Awaitable[U]],
     items: Iterable[T],
     *,
     limit: int,
     return_exceptions: bool = False,
-) -> list[R]:
+) -> list[U]:
     """Async ``map`` with a concurrency cap. Preserves input order."""
     return await gather_with_concurrency(
         limit,
@@ -135,7 +139,7 @@ class BackgroundTaskSupervisor:
 
     def spawn(
         self,
-        coro: Awaitable[Any],
+        coro: Coroutine[Any, Any, Any],
         *,
         name: str | None = None,
     ) -> asyncio.Task[Any]:
@@ -143,7 +147,7 @@ class BackgroundTaskSupervisor:
             msg = "supervisor is closed; cannot spawn new tasks"
             raise RuntimeError(msg)
 
-        task = asyncio.create_task(coro, name=name)
+        task: asyncio.Task[Any] = asyncio.create_task(coro, name=name)
         self._tasks.add(task)
         task.add_done_callback(self._on_done)
         return task
@@ -160,8 +164,8 @@ class BackgroundTaskSupervisor:
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
 
-    async def aclose(self, *, timeout: float = 10.0) -> None:
-        """Cancel pending tasks and wait for them to settle."""
+    async def aclose(self, *, grace_seconds: float = 10.0) -> None:
+        """Cancel pending tasks and wait up to ``grace_seconds`` for them to settle."""
         self._closed = True
         pending = list(self._tasks)
         if not pending:
@@ -174,14 +178,14 @@ class BackgroundTaskSupervisor:
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(
                 asyncio.gather(*pending, return_exceptions=True),
-                timeout=timeout,
+                timeout=grace_seconds,
             )
 
 
 # ---------------------------------------------------------------------------
 # CPU-bound offload
 # ---------------------------------------------------------------------------
-async def run_cpu_bound(
+async def run_cpu_bound(  # noqa: UP047 — PEP 695 doesn't support ParamSpec yet
     limits: ConcurrencyLimits,
     func: Callable[P, R],
     /,
@@ -242,7 +246,11 @@ def _resolve_limits_from_args(args: tuple[Any, ...]) -> ConcurrencyLimits:
 
 
 @asynccontextmanager
-async def timeout_after(seconds: float, *, name: str = "operation"):  # type: ignore[no-untyped-def]
+async def timeout_after(
+    seconds: float,
+    *,
+    name: str = "operation",
+) -> AsyncIterator[None]:
     """Context manager that raises ``TimeoutError`` after ``seconds``.
 
     Thin wrapper around :func:`asyncio.timeout` that adds structured logging

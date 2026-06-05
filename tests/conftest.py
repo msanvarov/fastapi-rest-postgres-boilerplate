@@ -18,17 +18,25 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator
 
-import pytest
-from httpx import ASGITransport, AsyncClient
-
+# Env must be primed before any ``app.*`` import — Settings reads it eagerly.
 os.environ.setdefault("SECRET_KEY", "test-secret-must-be-at-least-32-characters-long-ok")
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("POSTGRES_DB", "app_test")
+# Disable the redis-backed rate limiter in tests — we don't want to depend on a
+# live redis just to exercise the request path. The middleware is exercised by
+# its own dedicated tests.
+os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 
-from app.core.config import get_settings  # noqa: E402
-from app.db.base import Base  # noqa: E402
-from app.db.session import Database  # noqa: E402
-from app.main import create_app  # noqa: E402
+import pytest
+from asgi_lifespan import LifespanManager
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+
+from app.core.concurrency import ConcurrencyLimits
+from app.core.config import get_settings
+from app.db.base import Base
+from app.db.session import Database
+from app.main import create_app
 
 
 @pytest.fixture(scope="session")
@@ -38,25 +46,27 @@ def settings():
 
 
 @pytest.fixture
-async def app_instance():
-    """Fresh app per test; lifespan runs via the ASGI transport."""
+async def app_instance() -> FastAPI:
+    """Fresh app per test; lifespan is driven by :class:`LifespanManager`."""
     return create_app()
 
 
 @pytest.fixture
-async def client(app_instance) -> AsyncIterator[AsyncClient]:
-    async with AsyncClient(
-        transport=ASGITransport(app=app_instance),
-        base_url="http://test",
-    ) as ac:
-        # Trigger lifespan by hitting the live endpoint (HTTPX runs it on first req).
+async def client(app_instance: FastAPI) -> AsyncIterator[AsyncClient]:
+    # LifespanManager runs the lifespan context the same way uvicorn would —
+    # without it, ASGITransport never fires startup and app.state is empty.
+    async with (
+        LifespanManager(app_instance),
+        AsyncClient(
+            transport=ASGITransport(app=app_instance),
+            base_url="http://test",
+        ) as ac,
+    ):
         yield ac
 
 
 @pytest.fixture
 async def db(settings) -> AsyncIterator[Database]:
-    from app.core.concurrency import ConcurrencyLimits
-
     limits = ConcurrencyLimits.create()
     instance = await Database(settings, limits).connect()
     async with instance.engine.begin() as conn:

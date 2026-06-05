@@ -66,8 +66,7 @@ class HttpClient:
         )
         async def _do() -> httpx.Response:
             async with self._limits.http:
-                response = await self._client.request(method, url, **kwargs)
-            return response
+                return await self._client.request(method, url, **kwargs)
 
         return await _do()
 

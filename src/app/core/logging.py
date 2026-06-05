@@ -107,7 +107,8 @@ def configure_logging() -> None:
 
 def get_logger(name: str | None = None, **initial_values: Any) -> structlog.stdlib.BoundLogger:
     """Return a configured logger pre-bound with ``initial_values``."""
-    return structlog.get_logger(name).bind(**initial_values)
+    logger: structlog.stdlib.BoundLogger = structlog.get_logger(name)
+    return logger.bind(**initial_values)
 
 
 __all__ = [

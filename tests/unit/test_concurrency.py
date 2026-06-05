@@ -72,7 +72,7 @@ async def test_supervisor_cancels_pending_on_close():
 
     task = sup.spawn(long_running())
     await started.wait()
-    await sup.aclose(timeout=1.0)
+    await sup.aclose(grace_seconds=1.0)
     assert task.cancelled()
 
 

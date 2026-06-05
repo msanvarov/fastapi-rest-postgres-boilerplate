@@ -30,6 +30,7 @@ from fastapi.responses import ORJSONResponse
 from starlette.middleware.base import RequestResponseEndpoint
 
 from app import __version__
+from app.api.v1.endpoints.ping import router as ping_router
 from app.api.v1.router import router as v1_router
 from app.core.concurrency import BackgroundTaskSupervisor, ConcurrencyLimits
 from app.core.config import Settings, get_settings
@@ -75,7 +76,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await supervisor.aclose()
         try:
             await redis_client.aclose()
-        except Exception:  # noqa: BLE001 — best-effort shutdown
+        except Exception:
+            # Best-effort shutdown — don't let a redis hiccup prevent teardown.
             logger.exception("redis_close_failed")
         await http.aclose()
         await db.disconnect()
@@ -125,7 +127,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             call_next: RequestResponseEndpoint,
         ) -> Response:
             limiter: RateLimitMiddleware | None = getattr(
-                request.app.state, "_rate_limit_mw", None,
+                request.app.state,
+                "_rate_limit_mw",
+                None,
             )
             if limiter is None:
                 # ``app`` argument is unused by our dispatch — pass a sentinel.
@@ -146,8 +150,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Also expose /ping at the root so smoke tooling never has to know about
     # the API version prefix. Both paths return identical payloads.
-    from app.api.v1.endpoints.ping import router as ping_router
-
     app.include_router(ping_router)
 
     @app.get("/", include_in_schema=False)

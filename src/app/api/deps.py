@@ -9,7 +9,7 @@ via ``app.dependency_overrides``.
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
@@ -35,16 +35,18 @@ _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=
 # ---------------------------------------------------------------------------
 # Singletons (resolved from app state)
 # ---------------------------------------------------------------------------
+# Starlette types ``app.state`` attribute access as ``Any``; cast through the
+# expected concrete types so the rest of the codebase stays strictly typed.
 def get_db(request: Request) -> Database:
-    return request.app.state.db
+    return cast("Database", request.app.state.db)
 
 
 def get_limits(request: Request) -> ConcurrencyLimits:
-    return request.app.state.limits
+    return cast("ConcurrencyLimits", request.app.state.limits)
 
 
 def get_supervisor(request: Request) -> BackgroundTaskSupervisor:
-    return request.app.state.supervisor
+    return cast("BackgroundTaskSupervisor", request.app.state.supervisor)
 
 
 # ---------------------------------------------------------------------------

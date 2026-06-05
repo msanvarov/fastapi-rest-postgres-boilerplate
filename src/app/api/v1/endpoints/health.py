@@ -16,6 +16,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel
 
+from app import __version__
 from app.api.deps import DbDep
 from app.core.config import Settings, get_settings
 
@@ -37,8 +38,6 @@ class ReadinessResponse(BaseModel):
 async def liveness(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> LivenessResponse:
-    from app import __version__
-
     return LivenessResponse(service=settings.app_name, version=__version__)
 
 

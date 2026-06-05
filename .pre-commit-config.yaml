@@ -47,7 +47,7 @@ repos:
           - pydantic>=2.10.4
           - pydantic-settings>=2.7.0
           - sqlalchemy>=2.0.36
-          - types-pyjwt
+          - pyjwt>=2.10.1
         args: [--config-file=pyproject.toml]
         files: ^src/
         exclude: ^alembic/
