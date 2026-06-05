@@ -19,8 +19,9 @@ COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /uvx /usr/local/bin/
 WORKDIR /app
 
 # Resolve and install deps first — cached separately from the source tree
-# so app code changes don't bust the dependency layer.
-COPY pyproject.toml uv.lock* ./
+# so app code changes don't bust the dependency layer. README is referenced
+# by pyproject.toml's `readme = ...` so hatchling validates its presence.
+COPY pyproject.toml uv.lock* README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 

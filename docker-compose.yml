@@ -41,7 +41,12 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    env_file: .env
+    # .env is optional — CI / smoke runs supply config via `environment:` from
+    # an overlay file, and fresh clones don't have a .env yet. Compose 2.24+
+    # honours `required: false` and treats a missing file as empty.
+    env_file:
+      - path: .env
+        required: false
     environment:
       POSTGRES_HOST: postgres
       REDIS_URL: redis://redis:6379/0
